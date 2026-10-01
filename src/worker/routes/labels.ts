@@ -1,6 +1,10 @@
 import { Hono } from "hono";
+import { requireAuth } from "../middleware/auth";
+import type { WorkerEnv } from "../types";
 
-const labels = new Hono<{ Bindings: Env }>();
+const labels = new Hono<WorkerEnv>();
+
+labels.use("*", requireAuth);
 
 labels.get("/", (c) => c.json({ message: "Not implemented" }, 501));
 labels.post("/", (c) => c.json({ message: "Not implemented" }, 501));
