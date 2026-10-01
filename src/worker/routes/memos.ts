@@ -1,6 +1,10 @@
 import { Hono } from "hono";
+import { requireAuth } from "../middleware/auth";
+import type { WorkerEnv } from "../types";
 
-const memos = new Hono<{ Bindings: Env }>();
+const memos = new Hono<WorkerEnv>();
+
+memos.use("*", requireAuth);
 
 memos.get("/", (c) => c.json({ message: "Not implemented" }, 501));
 memos.get("/:id", (c) => c.json({ message: "Not implemented" }, 501));

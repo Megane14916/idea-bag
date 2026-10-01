@@ -1,6 +1,7 @@
+export * from "./auth-schema";
 import { index, integer, primaryKey, sqliteTable, text } from "drizzle-orm/sqlite-core";
 
-// userId will store the Better Auth user ID. Add user foreign keys when its schema exists.
+// userId stores the Better Auth user ID. Application-table foreign keys are deferred.
 // Timestamps are ISO 8601 UTC strings supplied by the application on insert/update.
 export const memos = sqliteTable("memos", {
 	id: text("id").primaryKey().notNull(),
