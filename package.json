@@ -12,6 +12,7 @@
     "publish": true
   },
   "dependencies": {
+    "drizzle-orm": "^0.45.3",
     "hono": "4.11.1",
     "react": "19.2.1",
     "react-dom": "19.2.1"
@@ -23,6 +24,7 @@
     "@types/react": "19.2.7",
     "@types/react-dom": "19.2.3",
     "@vitejs/plugin-react": "5.1.1",
+    "drizzle-kit": "^0.31.11",
     "eslint": "9.39.2",
     "eslint-plugin-react-hooks": "7.0.1",
     "eslint-plugin-react-refresh": "0.4.24",
@@ -40,7 +42,11 @@
     "deploy": "wrangler deploy",
     "dev": "vite",
     "lint": "eslint .",
-    "preview": "npm run build && vite preview"
+    "preview": "npm run build && vite preview",
+    "typecheck": "tsc -b",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate:local": "wrangler d1 migrations apply idea-bag-db --local --config wrangler.json",
+    "db:migrate:remote": "wrangler d1 migrations apply idea-bag-db --remote --config wrangler.json"
   },
   "type": "module"
 }
