@@ -1,5 +1,5 @@
 import { and, asc, eq, exists, or, sql } from "drizzle-orm";
-import type { CreateMemoRequest, Memo, UpdateMemoRequest } from "../../shared/types";
+import type { AcceptExpandedIdeaRequest, CreateMemoRequest, Memo, UpdateMemoRequest } from "../../shared/types";
 import { ApiError } from "../api-error";
 import { createDb } from "../db";
 import { labels, memoLabels, memos } from "../db/schema";
@@ -31,7 +31,7 @@ export async function listMemos(binding: Env["DB"], userId: string, query: { q?:
 	for (const { memo, label } of rows) {
 		let value = result.get(memo.id);
 		if (!value) {
-			value = { id: memo.id, title: memo.title, content: memo.content, order: memo.orderIndex,
+			value = { id: memo.id, title: memo.title, content: memo.content, sourceMemoId: memo.sourceMemoId, order: memo.orderIndex,
 				createdAt: memo.createdAt, updatedAt: memo.updatedAt, labels: [] };
 			result.set(memo.id, value);
 		}
@@ -73,6 +73,27 @@ export async function createMemo(binding: Env["DB"], userId: string, body: Creat
 		orderIndex: sql`(SELECT coalesce(max(order_index), -1) + 1 FROM memos WHERE user_id = ${userId})`,
 		createdAt: now, updatedAt: now });
 	await db.batch([insert, associations(db, userId, id, labelIds)]);
+	return getMemo(binding, userId, id);
+}
+
+export async function acceptExpandedIdea(binding: Env["DB"], userId: string, sourceId: string, body: AcceptExpandedIdeaRequest): Promise<Memo> {
+	const db = createDb(binding);
+	await getMemo(binding, userId, sourceId);
+	const id = crypto.randomUUID();
+	const now = new Date().toISOString();
+	// Recheck ownership in the write, so a concurrent source deletion cannot
+	// leave a new memo behind after the initial ownership check.
+	const inserted = await db.insert(memos).select(db.select({
+		id: sql<string>`${id}`.as("id"),
+		userId: sql<string>`${userId}`.as("user_id"),
+		title: sql<string>`${body.title}`.as("title"),
+		content: sql<string>`${body.content}`.as("content"),
+		sourceMemoId: memos.id,
+		orderIndex: sql<number>`(SELECT coalesce(max(order_index), -1) + 1 FROM memos WHERE user_id = ${userId})`.as("order_index"),
+		createdAt: sql<string>`${now}`.as("created_at"),
+		updatedAt: sql<string>`${now}`.as("updated_at"),
+	}).from(memos).where(ownsMemo(userId, sourceId))).returning({ id: memos.id });
+	if (!inserted.length) throw new ApiError(404, "MEMO_NOT_FOUND", "Memo not found");
 	return getMemo(binding, userId, id);
 }
 

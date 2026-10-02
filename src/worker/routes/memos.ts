@@ -1,8 +1,9 @@
 import { Hono } from "hono";
 import { requireAuth } from "../middleware/auth";
 import type { WorkerEnv } from "../types";
-import { createMemo, deleteMemo, getMemo, listMemos, reorderMemos, updateMemo } from "../services/memos";
-import { memoBody, memoQuery, readBody, reorderBody, validateId } from "../validation";
+import { acceptExpandedIdea, createMemo, deleteMemo, getMemo, listMemos, reorderMemos, updateMemo } from "../services/memos";
+import { expandIdea } from "../services/idea-expander";
+import { acceptExpandedIdeaBody, memoBody, memoQuery, readBody, reorderBody, validateId } from "../validation";
 
 const memos = new Hono<WorkerEnv>();
 
@@ -19,6 +20,12 @@ memos.patch("/order", async (c) => {
 	return c.body(null, 204);
 });
 memos.get("/:id", async (c) => c.json(await getMemo(c.env.DB, c.get("user").id, validateId(c.req.param("id")))));
+memos.post("/:id/expand", async (c) => {
+	const memo = await getMemo(c.env.DB, c.get("user").id, validateId(c.req.param("id")));
+	return c.json(await expandIdea(c.env.AI, memo));
+});
+memos.post("/:id/expand/accept", async (c) => c.json(await acceptExpandedIdea(c.env.DB, c.get("user").id,
+	validateId(c.req.param("id")), acceptExpandedIdeaBody(await readBody(c))), 201));
 memos.patch("/:id", async (c) => c.json(await updateMemo(c.env.DB, c.get("user").id,
 	validateId(c.req.param("id")), memoBody(await readBody(c), true))));
 memos.delete("/:id", async (c) => {
