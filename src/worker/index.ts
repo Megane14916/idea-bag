@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { ApiError } from "./api-error";
 import type { User } from "../shared/types";
 import { AuthConfigurationError, createAuth } from "./auth";
 import { requireAuth } from "./middleware/auth";
@@ -28,6 +29,9 @@ app.route("/api/memos", memos);
 app.route("/api/labels", labels);
 app.notFound((c) => c.json({ error: { code: "NOT_FOUND", message: "Route not found" } }, 404));
 app.onError((error, c) => {
+	if (error instanceof ApiError) {
+		return c.json({ error: { code: error.code, message: error.message } }, error.status);
+	}
 	if (error instanceof AuthConfigurationError) {
 		return c.json({ error: { code: "AUTH_NOT_CONFIGURED", message: error.message } }, 503);
 	}

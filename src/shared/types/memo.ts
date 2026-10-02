@@ -18,3 +18,7 @@ export interface CreateMemoRequest {
 }
 
 export type UpdateMemoRequest = Partial<CreateMemoRequest>;
+
+export interface ReorderMemosRequest {
+	memoIds: string[];
+}
