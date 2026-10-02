@@ -53,7 +53,8 @@
     "db:migrate:local": "wrangler d1 migrations apply idea-bag-db --local --config wrangler.json",
     "db:migrate:remote": "wrangler d1 migrations apply idea-bag-db --remote --config wrangler.json",
     "auth:generate": "auth generate --adapter drizzle --dialect sqlite --config ./src/worker/auth/schema.config.ts --output ./src/worker/db/auth-schema.ts --yes",
-    "test:auth": "npm run build && tsx --test tests/auth.test.mjs"
+    "test:auth": "npm run build && tsx --test tests/auth.test.mjs",
+    "test:api": "npm run build && tsx --test tests/auth.test.mjs"
   },
   "type": "module"
 }

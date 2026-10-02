@@ -5,7 +5,7 @@
 APIはすべて `/api` 配下に配置する。
 
 認証には Better Auth + Google OAuth を使用する。  
-メモに関するAPIはログイン必須とし、ログイン中のユーザー自身のデータのみ操作できるものとする。
+Memo / Label APIはすべてログイン必須とし、ログイン中のユーザー自身のデータのみ操作できるものとする。
 
 ---
 
@@ -78,6 +78,10 @@ GET /api/memos?q=ハッカソン&labelId=label_1
 ```
 
 検索対象は `title` と `content` とする。
+
+一覧は `order` 昇順（同値はID順）。`q` はSQLiteの `LIKE` による部分一致で、ASCII英字の大文字小文字は区別しない。`%`・`_`・`\` は通常の文字として検索する。空の `q` は検索条件なしとする。
+`labelId` は自分のラベルが付いたメモだけを対象にし、存在しないIDや他ユーザーのIDでは空配列を返す。`q` と `labelId` はAND条件で併用できる。
+同じquery parameterの複数指定、空文字・空白のみの `labelId` は400。
 
 ---
 
@@ -271,5 +275,40 @@ DELETE /api/labels/:id
 401 Unauthorized
 403 Forbidden
 404 Not Found
+409 Conflict
 500 Internal Server Error
 ```
+
+## Memo / Label APIの補足
+
+| API | 成功時のステータス / 本文 |
+| --- | --- |
+| `GET /api/memos` | 200 / `Memo[]` |
+| `GET /api/memos/:id` | 200 / ラベルを含む `Memo` |
+| `POST /api/memos` | 201 / 作成した `Memo` |
+| `PATCH /api/memos/:id` | 200 / 更新した `Memo` |
+| `DELETE /api/memos/:id` | 204 / 本文なし |
+| `PATCH /api/memos/order` | 204 / 本文なし |
+| `GET /api/labels` | 200 / `Label[]`（名前、IDの昇順） |
+| `POST /api/labels` | 201 / 作成した `Label` |
+| `PATCH /api/labels/:id` | 200 / 更新した `Label` |
+| `DELETE /api/labels/:id` | 204 / 本文なし |
+
+- Memo作成時の `title`・`content` はstring必須（空文字は可）。`labelIds` は任意のstring配列。表示順はユーザーの現在の最大値 + 1（最初は0）。
+- Memo編集は `title`・`content`・`labelIds` の指定項目だけを更新し、`updatedAt` を更新する。`labelIds` の省略は関連を維持し、指定時は全置換、空配列は全解除。作成・編集の本文更新とラベル関連更新はD1 batchで原子的に行う。
+- `labelIds`・`memoIds` は空文字・空白のみのID、string以外、重複IDを拒否する。Memo削除は関連も削除する。Label削除は関連だけを削除し、Memo本体は残す。
+- 並べ替えはユーザーの全Memo IDをちょうど1回ずつ送信し、配列順に0から番号を付ける。空の一覧には空配列を送信できる。`updatedAt` も更新する。
+- Labelの `name` はstring必須で前後の空白を除去する。空文字・空白のみは拒否する。同一ユーザーの同名ラベルは409（大文字小文字は区別）。別ユーザーには同名を許可する。
+- Request bodyはJSON object必須。不正JSON・型不正は400。未定義のbody項目は使用しない。`userId` や `order` をbodyで指定しても反映しない。
+
+| エラーコード | HTTP | 条件 |
+| --- | --- | --- |
+| `VALIDATION_ERROR` | 400 | 不正なbody/query/ID、全件を満たさない並べ替え |
+| `UNAUTHORIZED` | 401 | 未ログイン・無効なセッション |
+| `MEMO_NOT_FOUND` | 404 | Memoが存在しない、または所有者が異なる |
+| `LABEL_NOT_FOUND` | 404 | 操作対象または指定したLabelが存在しない、または所有者が異なる |
+| `DUPLICATE_LABEL` | 409 | 同一ユーザーに同名Labelが存在する |
+| `MEMO_ORDER_CONFLICT` | 409 | 並べ替え検証後にMemo一覧が変化した（再取得して再送） |
+| `INTERNAL_SERVER_ERROR` | 500 | 内部エラー（DB詳細・stack traceは返さない） |
+
+実装で参照した公式仕様：[D1 batch](https://developers.cloudflare.com/d1/worker-api/d1-database/#batch)、[D1 limits](https://developers.cloudflare.com/d1/platform/limits/)、[Drizzle batch](https://orm.drizzle.team/docs/batch-api)。

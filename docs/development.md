@@ -98,6 +98,14 @@ npm run check
 `cf-typegen` は `wrangler types` を実行し、`worker-configuration.d.ts` を更新します。
 `check` にはデプロイのdry-runが含まれます。
 
+Memo / Label APIと認証の統合テスト：
+
+```sh
+npm run test:api
+```
+
+既存の `tests/auth.test.mjs` にAPIテストを追加しています。ビルドしたWorkerをMiniflare上で動かし、一時的なD1に既存migrationを適用して検証します。Better Authのテスト専用ヘルパーで2ユーザーの実セッションを作り、CRUD・所有権・検索・ラベル同期・並べ替え・validation・batchのロールバックを確認します。Googleへの実ログインや本番DBの変更は行いません。`npm run test:auth` でも同じテスト全体を実行します。
+
 ## 実装の境界
 
 APIの型は `src/shared/types` の独立したcamelCase型です。日時はISO 8601 UTC文字列を使います。

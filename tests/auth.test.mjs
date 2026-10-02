@@ -19,6 +19,7 @@ const bindings = {
 const protectedRoutes = [
 	["GET", "/api/memos"], ["GET", "/api/memos/"], ["GET", "/api/memos/example"],
 	["POST", "/api/memos"], ["PATCH", "/api/memos/example"], ["DELETE", "/api/memos/example"],
+	["PATCH", "/api/memos/order"],
 	["GET", "/api/labels"], ["GET", "/api/labels/"], ["POST", "/api/labels"],
 	["PATCH", "/api/labels/example"], ["DELETE", "/api/labels/example"],
 ];
@@ -103,9 +104,9 @@ test("D1 sessions grant access and /api/me exposes only the user DTO", async () 
 	const loggedIn = await login();
 	const stored = await db.prepare("SELECT user_id FROM session WHERE id = ?").bind(loggedIn.session.id).first();
 	assert.equal(stored.user_id, loggedIn.user.id);
-	for (const [method, path] of protectedRoutes) {
+	for (const [method, path] of protectedRoutes.filter(([method]) => method === "GET")) {
 		const response = await request(path, { method, headers: loggedIn.headers });
-		assert.equal(response.status, path.endsWith("/") ? 404 : 501, method + " " + path);
+		assert.equal(response.status, path.endsWith("/") || path.endsWith("example") ? 404 : 200, method + " " + path);
 	}
 	const response = await request("/api/me", { headers: loggedIn.headers });
 	assert.equal(response.status, 200);
@@ -180,4 +181,200 @@ test("missing configuration has no fallback secret and leaves anonymous APIs pro
 	assert.equal(response.status, 503);
 	assert.equal((await response.json()).error.code, "AUTH_NOT_CONFIGURED");
 	assert.equal((await app.request(origin + "/api/me", {}, emptyEnv)).status, 401);
+});
+
+// Exercise the bundled Worker with real D1 sessions and migrations, without an auth bypass.
+async function api(loggedIn, method, path, body, status = 200) {
+	const response = await request(path, {
+		method, headers: jsonHeaders(loggedIn.headers),
+		...(body === undefined ? {} : { body: JSON.stringify(body) }),
+	});
+	assert.equal(response.status, status, method + " " + path);
+	if (status === 204) {
+		assert.equal(await response.text(), "");
+		return;
+	}
+	return response.json();
+}
+
+test("Label CRUD trims names, rejects duplicates per user, and isolates owners", async () => {
+	const a = await login();
+	const b = await login();
+	const label = await api(a, "POST", "/api/labels", { name: " 開発 " }, 201);
+	assert.deepEqual(Object.keys(label).sort(), ["id", "name"]);
+	assert.equal(label.name, "開発");
+	assert.deepEqual(await api(a, "GET", "/api/labels"), [label]);
+	assert.deepEqual(await api(b, "GET", "/api/labels"), []);
+	assert.equal((await api(a, "POST", "/api/labels", { name: "開発" }, 409)).error.code, "DUPLICATE_LABEL");
+	await api(b, "POST", "/api/labels", { name: "開発" }, 201);
+	for (const id of [label.id, "missing"]) {
+		assert.equal((await api(b, "PATCH", "/api/labels/" + id, { name: "技術" }, 404)).error.code, "LABEL_NOT_FOUND");
+		await api(b, "DELETE", "/api/labels/" + id, undefined, 404);
+	}
+	const other = await api(a, "POST", "/api/labels", { name: "別名" }, 201);
+	await api(a, "PATCH", "/api/labels/" + other.id, { name: "開発" }, 409);
+	assert.deepEqual(await api(a, "PATCH", "/api/labels/" + label.id, { name: "技術" }), { ...label, name: "技術" });
+	await api(a, "PATCH", "/api/labels/" + label.id, { name: "技術" });
+	await api(a, "DELETE", "/api/labels/" + label.id, undefined, 204);
+	await api(a, "DELETE", "/api/labels/" + label.id, undefined, 404);
+});
+
+test("Memo CRUD and label synchronization preserve unspecified fields and cascade associations", async () => {
+	const a = await login();
+	const l1 = await api(a, "POST", "/api/labels", { name: "A" }, 201);
+	const l2 = await api(a, "POST", "/api/labels", { name: "B" }, 201);
+	const l3 = await api(a, "POST", "/api/labels", { name: "C" }, 201);
+	const memo = await api(a, "POST", "/api/memos", { title: "ハッカソン", content: "本文", labelIds: [l1.id, l2.id] }, 201);
+	assert.deepEqual(Object.keys(memo).sort(), ["id", "title", "content", "order", "labels", "createdAt", "updatedAt"].sort());
+	assert.deepEqual(memo.labels, [l1, l2]);
+	assert.equal(memo.order, 0);
+	assert.ok(!Number.isNaN(Date.parse(memo.createdAt)));
+	assert.deepEqual(await api(a, "GET", "/api/memos/" + memo.id), memo);
+	await db.prepare("UPDATE memos SET updated_at = ? WHERE id = ?").bind("2020-01-01T00:00:00Z", memo.id).run();
+	let updated = await api(a, "PATCH", "/api/memos/" + memo.id, { title: "更新" });
+	assert.equal(updated.title, "更新");
+	assert.equal(updated.content, memo.content);
+	assert.deepEqual(updated.labels, memo.labels);
+	assert.equal(updated.createdAt, memo.createdAt);
+	assert.ok(Date.parse(updated.updatedAt) > Date.parse("2020-01-01T00:00:00Z"));
+	updated = await api(a, "PATCH", "/api/memos/" + memo.id, { labelIds: [l2.id, l3.id] });
+	assert.deepEqual(updated.labels, [l2, l3]);
+	assert.equal(updated.title, "更新");
+	updated = await api(a, "PATCH", "/api/memos/" + memo.id, { content: "新本文" });
+	assert.equal(updated.content, "新本文");
+	assert.deepEqual(updated.labels, [l2, l3]);
+	updated = await api(a, "PATCH", "/api/memos/" + memo.id, { labelIds: [] });
+	assert.deepEqual(updated.labels, []);
+	await api(a, "PATCH", "/api/memos/" + memo.id, { labelIds: [l1.id, l2.id] });
+	await api(a, "DELETE", "/api/labels/" + l1.id, undefined, 204);
+	assert.deepEqual((await api(a, "GET", "/api/memos/" + memo.id)).labels, [l2]);
+	await api(a, "DELETE", "/api/memos/" + memo.id, undefined, 204);
+	assert.equal((await db.prepare("SELECT count(*) AS n FROM memo_labels WHERE memo_id = ?").bind(memo.id).first()).n, 0);
+	await api(a, "GET", "/api/memos/" + memo.id, undefined, 404);
+	assert.ok((await api(a, "GET", "/api/labels")).some((label) => label.id === l2.id));
+});
+
+test("users cannot read, edit, delete, associate, filter or reorder another user's data", async () => {
+	const a = await login();
+	const b = await login();
+	const label = await api(b, "POST", "/api/labels", { name: "Private" }, 201);
+	const memo = await api(b, "POST", "/api/memos", { title: "Private", content: "secret", labelIds: [label.id] }, 201);
+	const own = await api(a, "POST", "/api/memos", { title: "Own", content: "body" }, 201);
+	assert.deepEqual(await api(a, "GET", "/api/memos"), [own]);
+	for (const id of [memo.id, "missing"]) {
+		assert.equal((await api(a, "GET", "/api/memos/" + id, undefined, 404)).error.code, "MEMO_NOT_FOUND");
+		await api(a, "PATCH", "/api/memos/" + id, { title: "stolen" }, 404);
+		await api(a, "DELETE", "/api/memos/" + id, undefined, 404);
+	}
+	for (const id of [label.id, "missing"]) {
+		await api(a, "POST", "/api/memos", { title: "bad", content: "", labelIds: [id] }, 404);
+		await api(a, "PATCH", "/api/memos/" + own.id, { title: "bad", labelIds: [id] }, 404);
+		assert.deepEqual(await api(a, "GET", "/api/memos?labelId=" + id), []);
+	}
+	await api(a, "PATCH", "/api/memos/order", { memoIds: [memo.id] }, 400);
+	assert.deepEqual(await api(a, "GET", "/api/memos/" + own.id), own);
+	assert.deepEqual(await api(b, "GET", "/api/memos/" + memo.id), memo);
+});
+
+test("keyword and label filters compose and LIKE metacharacters are literal", async () => {
+	const a = await login();
+	const l1 = await api(a, "POST", "/api/labels", { name: "開発" }, 201);
+	const l2 = await api(a, "POST", "/api/labels", { name: "別" }, 201);
+	const m1 = await api(a, "POST", "/api/memos", { title: "ハッカソン IDEA", content: "100% _ \\", labelIds: [l1.id, l2.id] }, 201);
+	const m2 = await api(a, "POST", "/api/memos", { title: "第二", content: "ハッカソン", labelIds: [l1.id] }, 201);
+	await api(a, "POST", "/api/memos", { title: "第三", content: "違う" }, 201);
+	const search = (q, labelId) => api(a, "GET", "/api/memos?q=" + encodeURIComponent(q) + (labelId ? "&labelId=" + labelId : ""));
+	assert.deepEqual((await search("ハッカソン")).map((memo) => memo.id), [m1.id, m2.id]);
+	assert.deepEqual((await search("ハッカソン", l2.id)).map((memo) => memo.id), [m1.id]);
+	assert.deepEqual((await api(a, "GET", "/api/memos?labelId=" + l1.id)).map((memo) => memo.id), [m1.id, m2.id]);
+	assert.deepEqual((await search("idea")).map((memo) => memo.id), [m1.id]);
+	for (const q of ["%", "_", "\\"]) assert.deepEqual((await search(q)).map((memo) => memo.id), [m1.id]);
+	assert.deepEqual(await search("absent"), []);
+	assert.equal((await search("")).length, 3);
+});
+
+test("ordering validates the entire ID set, updates atomically, and appends new memos", async () => {
+	const a = await login();
+	await api(a, "PATCH", "/api/memos/order", { memoIds: [] }, 204);
+	const memos = [];
+	for (let i = 0; i < 3; i++) {
+		const memo = await api(a, "POST", "/api/memos", { title: String(i), content: "" }, 201);
+		assert.equal(memo.order, i);
+		memos.push(memo);
+	}
+	for (const memoIds of [[], [memos[0].id], [memos[0].id, memos[0].id, memos[1].id], [memos[0].id, memos[1].id, "missing"]]) {
+		await api(a, "PATCH", "/api/memos/order", { memoIds }, 400);
+		assert.deepEqual((await api(a, "GET", "/api/memos")).map((memo) => memo.id), memos.map((memo) => memo.id));
+	}
+	const reversed = memos.map((memo) => memo.id).reverse();
+	await api(a, "PATCH", "/api/memos/order", { memoIds: reversed }, 204);
+	assert.deepEqual((await api(a, "GET", "/api/memos")).map(({ id, order }) => ({ id, order })), reversed.map((id, order) => ({ id, order })));
+	await api(a, "DELETE", "/api/memos/" + reversed[1], undefined, 204);
+	assert.equal((await api(a, "POST", "/api/memos", { title: "末尾", content: "" }, 201)).order, 3);
+});
+
+test("invalid bodies, JSON, IDs and repeated query parameters return unified 400 errors", async () => {
+	const a = await login();
+	const memo = await api(a, "POST", "/api/memos", { title: "", content: "" }, 201);
+	const invalid = [
+		["POST", "/api/memos", {}], ["POST", "/api/memos", { title: 1, content: "" }],
+		["POST", "/api/memos", { title: "", content: null }], ["POST", "/api/memos", []],
+		["POST", "/api/memos", null], ["POST", "/api/memos", "text"],
+		...[null, "x", [1], [""], [" "], ["id", "id"]].map((labelIds) => ["PATCH", "/api/memos/" + memo.id, { labelIds }]),
+		["PATCH", "/api/memos/" + memo.id, { title: null }],
+		["PATCH", "/api/memos/order", {}], ["PATCH", "/api/memos/order", { memoIds: "x" }],
+		["PATCH", "/api/memos/order", { memoIds: [""] }],
+		...[undefined, 1, "", " ", null].map((name) => ["POST", "/api/labels", { name }]),
+		["PATCH", "/api/labels/missing", { name: " " }],
+		["GET", "/api/memos?labelId="], ["GET", "/api/memos?labelId=%20"],
+		["GET", "/api/memos?q=a&q=b"], ["GET", "/api/memos?labelId=a&labelId=b"],
+		["GET", "/api/memos/%20"],
+	];
+	for (const [method, path, body] of invalid) {
+		const result = await api(a, method, path, body, 400);
+		assert.equal(result.error.code, "VALIDATION_ERROR");
+		assert.equal(typeof result.error.message, "string");
+	}
+	for (const path of ["/api/memos", "/api/labels", "/api/memos/order"]) {
+		const response = await request(path, { method: path.endsWith("order") ? "PATCH" : "POST", headers: jsonHeaders(a.headers), body: "{" });
+		assert.equal(response.status, 400);
+		assert.equal((await response.json()).error.code, "VALIDATION_ERROR");
+	}
+});
+
+test("concurrent label creation rejects duplicates and memo creation gets distinct orders", async () => {
+	const a = await login();
+	const statuses = await Promise.all([1, 2].map(async () => (await request("/api/labels", {
+		method: "POST", headers: jsonHeaders(a.headers), body: JSON.stringify({ name: "同名" }),
+	})).status));
+	assert.deepEqual(statuses.sort(), [201, 409]);
+	const memos = await Promise.all([1, 2].map((i) => api(a, "POST", "/api/memos", { title: String(i), content: "" }, 201)));
+	assert.deepEqual(memos.map((memo) => memo.order).sort(), [0, 1]);
+});
+
+test("D1 batch rolls back memo and association changes and hides database errors", async () => {
+	const a = await login();
+	const originalLabel = await api(a, "POST", "/api/labels", { name: "original" }, 201);
+	const badLabel = await api(a, "POST", "/api/labels", { name: "failure" }, 201);
+	const memo = await api(a, "POST", "/api/memos", { title: "original", content: "", labelIds: [originalLabel.id] }, 201);
+	await db.prepare(`CREATE TRIGGER test_association_failure BEFORE INSERT ON memo_labels WHEN NEW.label_id = '${badLabel.id}' BEGIN SELECT RAISE(ABORT, 'test private database failure'); END`).run();
+	try {
+		for (const [method, path, body] of [
+			["POST", "/api/memos", { title: "failure", content: "", labelIds: [badLabel.id] }],
+			["PATCH", "/api/memos/" + memo.id, { title: "failure", labelIds: [badLabel.id] }],
+		]) {
+			assert.deepEqual(await api(a, method, path, body, 500), { error: { code: "INTERNAL_SERVER_ERROR", message: "Internal server error" } });
+			assert.deepEqual(await api(a, "GET", "/api/memos"), [memo]);
+		}
+	} finally { await db.prepare("DROP TRIGGER test_association_failure").run(); }
+});
+
+test("reordering more than 100 memos does not exceed D1's parameter limit", async () => {
+	const a = await login();
+	const ids = Array.from({ length: 110 }, () => crypto.randomUUID());
+	const now = new Date().toISOString();
+	await db.batch(ids.map((id, order) => db.prepare("INSERT INTO memos (id, user_id, title, content, order_index, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
+		.bind(id, a.user.id, id, "", order, now, now)));
+	await api(a, "PATCH", "/api/memos/order", { memoIds: [...ids].reverse() }, 204);
+	assert.deepEqual((await api(a, "GET", "/api/memos")).map((memo) => memo.id), [...ids].reverse());
 });
