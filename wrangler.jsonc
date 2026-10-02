@@ -17,6 +17,10 @@
 		"enabled": true
 	},
 	"upload_source_maps": true,
+	"ai": {
+		"binding": "AI",
+		"remote": true
+	},
 	"assets": {
 		"directory": "./dist/client",
 		"not_found_handling": "single-page-application",

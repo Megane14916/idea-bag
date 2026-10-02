@@ -42,10 +42,10 @@ ViteとCloudflare ViteプラグインがReactとWorkerを同じオリジン（`h
 | `npm run build` → `npm run deploy` | デプロイされたWorkerは本番D1を使用 |
 
 どちらもWorker内では同じ `c.env.DB` と `createDb(c.env.DB)` を使います。アプリコードや接続URLを変更する必要はありません。
-`wrangler.json` のD1 bindingに `remote: false` を明示しており、開発時はローカルD1を使います。この設定はデプロイ先で本番D1を使うことを妨げません。
+`wrangler.jsonc` のD1 bindingに `remote: false` を明示しており、開発時はローカルD1を使います。この設定はデプロイ先で本番D1を使うことを妨げません。
 実際の `database_id` を設定しても `npm run dev` はローカルDBを使います。
 ローカルと本番のデータ・migrationの適用履歴は別々で、自動で同期されません。
-`wrangler.json` のIDプレースホルダーのままでもローカル開発・migrationが可能です。
+`wrangler.jsonc` のIDプレースホルダーのままでもローカル開発・migrationが可能です。
 
 ## 本番D1の準備（公開する段階で実行）
 
@@ -57,7 +57,7 @@ npx wrangler d1 create idea-bag-db
 ```
 
 設定の自動追記を尋ねられた場合は手動設定を選び、既存bindingを重複させないでください。
-返された実際の `database_id` で、`wrangler.json` 内の `REPLACE_WITH_D1_DATABASE_ID` を置き換えます。
+返された実際の `database_id` で、`wrangler.jsonc` 内の `REPLACE_WITH_D1_DATABASE_ID` を置き換えます。
 `binding: "DB"`、`database_name: "idea-bag-db"`、`migrations_dir: "./drizzle"` は維持します。
 IDを変更するとローカルDBの保存先も変わるため、ローカルmigrationを再度実行してください。
 
@@ -65,6 +65,56 @@ IDを変更するとローカルDBの保存先も変わるため、ローカルm
 npm run db:migrate:local
 npm run cf-typegen
 ```
+
+## Workers AIによる発展案のローカル確認
+
+`wrangler.jsonc` は `AI: remote: true`、`DB: remote: false` を設定している。
+React・Hono・D1はローカル、AI推論だけCloudflare上で実行する。[公式のローカル開発仕様](https://developers.cloudflare.com/workers/local-development/#remote-bindings)に従う。
+AIを呼び出す開発サーバーにはCloudflareへのログインが必要。ログイン済みなら再実行不要。
+
+```sh
+npx wrangler login
+npm run db:migrate:local
+npm run cf-typegen
+npm run dev
+```
+
+既存のGoogle OAuth設定を済ませ、`http://localhost:5173` でログインする。ブラウザの開発者コンソールから、元Memoを作成して候補を取得できる。
+
+```js
+const source = await fetch("/api/memos", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({ title: "開発者向けSNS", content: "GitHubでの活動を通して仲間を見つけたい" }),
+}).then((r) => r.json());
+const expansionResponse = await fetch(`/api/memos/${source.id}/expand`, { method: "POST" });
+const expansion = await expansionResponse.json();
+console.log(expansionResponse.status, expansion);
+```
+
+200と3候補を確認し、`GET /api/memos` の件数が生成前後で変わらないことを確認する。
+候補から1件選び、例えば2番目を保存する場合は以下を実行する。
+
+```js
+const acceptedResponse = await fetch(`/api/memos/${source.id}/expand/accept`, {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify(expansion.candidates[1]),
+});
+console.log(acceptedResponse.status, await acceptedResponse.json());
+```
+
+201、sourceMemoIdが元ID、orderが末尾、一覧が1件だけ増えることを確認する。
+元Memoを削除しても新Memoが残り、sourceMemoIdはnullになる。未ログインは401、他ユーザー・不明な元IDは404、保存の不正bodyは400。
+AI不正出力や障害は502で、Memoの増加はない。候補選択UIは今回の実装範囲外。
+
+モデルの定数・プロンプト・解析は `src/worker/services/idea-expander.ts` に置く。
+各候補の本文は最大500文字、出力は最大1800 completion tokens、thinkingとstreamingを無効にしている。
+GemmaのJSON Modeは[公式対応一覧](https://developers.cloudflare.com/workers-ai/features/json-mode/#supported-models)で確認できないため指定せず、JSON専用プロンプトとサーバー検証を使う。
+再試行による追加推論は自動実行しない。
+
+`npm run test:api` はAIをモックし、実推論や無料枠の消費をせずに、生成時の非保存・3候補検証・所有権・選択保存・元Memo削除を検証する。
+実Gemmaによる生成品質、Cloudflareログイン、Google OAuthの実ログインは別途上記手順で確認する。
 
 ## スキーマとmigration
 
@@ -239,7 +289,7 @@ npm run test:auth
 
 ### 本番公開前
 
-本番D1の実際のIDを `wrangler.json` に設定し、`npm run db:migrate:remote` で認証migrationも適用します。
+本番D1の実際のIDを `wrangler.jsonc` に設定し、`npm run db:migrate:remote` で認証migrationも適用します。
 本番用Google OAuth Clientには公開URLのcallbackを登録します。Workers Secretsを以下の4つ設定してください（コマンドは入力を求めます）。
 
 ```sh

@@ -41,6 +41,7 @@ id
 user_id
 title
 content
+source_memo_id
 order_index
 created_at
 updated_at
@@ -54,11 +55,17 @@ updated_at
 | user_id | 作成したユーザー |
 | title | タイトル |
 | content | 本文 |
+| source_memo_id | 発展元のMemo ID（通常MemoはNULL） |
 | order_index | 表示順 |
 | created_at | 作成日時 |
 | updated_at | 更新日時 |
 
 1ユーザーが複数のメモを持つ。
+
+`source_memo_id` はnullableな自己参照外部キーで、`ON DELETE SET NULL` とする。
+元Memoを削除しても発展Memo本体は残り、参照だけがNULLになる。発展案の生成時点では何も保存しない。
+選択された1件を保存するときだけ、所有権を検証した元MemoのIDを設定する。APIでは `sourceMemoId: string | null` を返す。
+追加migration `0002_broken_junta.sql` はnullable列を追加し、既存Memoとラベル関連を維持する。
 
 ```text
 User 1 ─── N Memo

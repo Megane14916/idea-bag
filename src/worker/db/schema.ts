@@ -1,5 +1,5 @@
 export * from "./auth-schema";
-import { index, integer, primaryKey, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import { type AnySQLiteColumn, index, integer, primaryKey, sqliteTable, text } from "drizzle-orm/sqlite-core";
 
 // userId stores the Better Auth user ID. Application-table foreign keys are deferred.
 // Timestamps are ISO 8601 UTC strings supplied by the application on insert/update.
@@ -8,6 +8,7 @@ export const memos = sqliteTable("memos", {
 	userId: text("user_id").notNull(),
 	title: text("title").notNull(),
 	content: text("content").notNull(),
+	sourceMemoId: text("source_memo_id").references((): AnySQLiteColumn => memos.id, { onDelete: "set null" }),
 	orderIndex: integer("order_index").notNull().default(0),
 	createdAt: text("created_at").notNull(),
 	updatedAt: text("updated_at").notNull(),

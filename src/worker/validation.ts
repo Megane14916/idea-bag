@@ -1,5 +1,5 @@
 import type { Context } from "hono";
-import type { CreateMemoRequest, UpdateMemoRequest, ReorderMemosRequest, CreateLabelRequest } from "../shared/types";
+import type { AcceptExpandedIdeaRequest, CreateMemoRequest, UpdateMemoRequest, ReorderMemosRequest, CreateLabelRequest } from "../shared/types";
 import { ApiError } from "./api-error";
 import type { WorkerEnv } from "./types";
 
@@ -43,6 +43,15 @@ export function memoBody(body: Record<string, unknown>, partial: boolean): Updat
 
 export function reorderBody(body: Record<string, unknown>): ReorderMemosRequest {
 	return { memoIds: ids(body.memoIds, "memoIds") };
+}
+
+export function acceptExpandedIdeaBody(body: Record<string, unknown>): AcceptExpandedIdeaRequest {
+	for (const field of ["title", "content"] as const) {
+		if (typeof body[field] !== "string" || !body[field].trim()) {
+			invalid(`${field} must be a non-empty string`);
+		}
+	}
+	return { title: (body.title as string).trim(), content: (body.content as string).trim() };
 }
 
 export function labelBody(body: Record<string, unknown>): CreateLabelRequest {
