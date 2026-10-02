@@ -213,6 +213,7 @@ Workers AIで異なる方向性の候補を3件生成し、200で返す。この
 
 候補は正確に3件。title/contentは空白だけでないstringで、titleは100文字以内、contentは500文字以内（Unicodeコードポイント数）。前後の空白は除去する。
 AIのJSON・形式・件数・文字列・長さをサーバーで検証する。AI呼び出し失敗、不正JSON、不正候補、出力打ち切りは502 `AI_GENERATION_FAILED`。失敗時にもMemoは保存しない。
+Workerは失敗箇所を固定のreasonコードでwarnログへ記録する。メモ、生成結果、プロバイダーのエラーメッセージはログにもAPI応答にも含めない。reasonの一覧は `docs/development.md` の「AI拡張が502になる場合」を参照。
 
 ### 選択した発展案を保存する
 

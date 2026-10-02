@@ -106,12 +106,28 @@ console.log(acceptedResponse.status, await acceptedResponse.json());
 
 201、sourceMemoIdが元ID、orderが末尾、一覧が1件だけ増えることを確認する。
 元Memoを削除しても新Memoが残り、sourceMemoIdはnullになる。未ログインは401、他ユーザー・不明な元IDは404、保存の不正bodyは400。
-AI不正出力や障害は502で、Memoの増加はない。候補選択UIは今回の実装範囲外。
+AI不正出力や障害は502で、Memoの増加はない。画面の「AIで広げる」から候補の比較・再生成・選択保存も利用できる。
 
 モデルの定数・プロンプト・解析は `src/worker/services/idea-expander.ts` に置く。
 各候補の本文は最大500文字、出力は最大1800 completion tokens、thinkingとstreamingを無効にしている。
 GemmaのJSON Modeは[公式対応一覧](https://developers.cloudflare.com/workers-ai/features/json-mode/#supported-models)で確認できないため指定せず、JSON専用プロンプトとサーバー検証を使う。
 再試行による追加推論は自動実行しない。
+
+### AI拡張が502になる場合
+
+ブラウザの502は `AI_GENERATION_FAILED` を表す。原因の詳細は `npm run dev` を実行しているターミナルの `AI expansion failed` ログで確認する。
+
+| reason | 失敗箇所 |
+| --- | --- |
+| `provider_error` | Workers AI呼び出しの例外。Cloudflare認証・接続・利用枠などを確認する。 |
+| `response_shape` | 応答が想定するchat completionの形式ではない。 |
+| `output_truncated` | `finish_reason: length` により出力が打ち切られた。 |
+| `incomplete_output` | 出力が正常終了（`stop`）していない。 |
+| `invalid_json` | 生成内容をJSONとして解析できない。 |
+| `invalid_candidates` | 候補の件数・型・空文字・文字数の検証に失敗した。 |
+
+診断ログには固定のreasonだけを記録する。メモ本文、生成結果、認証情報、AIプロバイダーのエラーメッセージは記録しない。APIのエラー形式も変更しない。
+一度だけ失敗した場合は画面の「再試行」を利用する。繰り返し失敗する場合は、このreasonから原因を調べる。502だけで認証不足や利用枠超過とは断定しない。
 
 `npm run test:api` はAIをモックし、実推論や無料枠の消費をせずに、生成時の非保存・3候補検証・所有権・選択保存・元Memo削除を検証する。
 実Gemmaによる生成品質、Cloudflareログイン、Google OAuthの実ログインは別途上記手順で確認する。
@@ -165,8 +181,8 @@ DBの日時は作成・更新処理側で設定する前提です。DBクライ�
 
 `memos.user_id` と `labels.user_id` はBetter Authのuser IDを保存する前提です。既存データを維持するため、この2カラムへのuser外部キー追加は今回行っていません。
 認証のDB型はWorker内に閉じ、`src/shared/types/User` はAPI用の型として独立させています。
-指定されたMemo / Labelの9ルートは認証必須です。未ログイン時は401、ログイン済みの場合は暫定的にHTTP 501と `{ "message": "Not implemented" }` を返します。
-既存の `/api/` は維持しています。CRUD、検索、並べ替え、ラベル付け、ログインUIは未実装です。
+Memo / Labelの各ルートは認証必須です。未ログイン時は401を返します。CRUD・検索・並べ替え・AI発展案の生成／選択保存は実装済みです。
+既存の `/api/` は維持しています。React画面からCRUD・検索・並べ替え・ラベル管理・Googleログインを利用できます。UIの構成と検証は [frontend.md](./frontend.md) を参照してください。
 
 参考：[Cloudflare Vite構成](https://developers.cloudflare.com/workers/vite-plugin/tutorial/)、[D1 migration](https://developers.cloudflare.com/d1/reference/migrations/)、[Drizzle設定](https://orm.drizzle.team/docs/drizzle-config-file)。
 
@@ -261,8 +277,8 @@ app.get("/api/example", requireAuth, (c) => {
 
 ### ローカルでのログイン確認
 
-上記の設定・migrationを済ませて `npm run dev` を起動し、`http://localhost:5173` を開きます。UIは追加していません。
-開発中はブラウザのDevTools Consoleから、最小限のReact clientを読み込んで確認できます（Vite dev専用）。
+上記の設定・migrationを済ませて `npm run dev` を起動し、`http://localhost:5173` を開き、「Googleでログイン」からログインします。ログイン後はメモ一覧が表示されます。
+補助的に、開発中はブラウザのDevTools ConsoleからReact clientを読み込んで確認することもできます（Vite dev専用）。
 
 ```js
 const { authClient } = await import("/src/react-app/lib/auth-client.ts");
