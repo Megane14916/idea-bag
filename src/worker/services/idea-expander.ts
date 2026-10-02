@@ -19,18 +19,28 @@ function object(value: unknown): value is Record<string, unknown> {
 	return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
-function generationFailed(): never {
-	throw new ApiError(502, "AI_GENERATION_FAILED", "Failed to generate expanded ideas");
+type FailureReason = "response_shape" | "output_truncated" | "incomplete_output" | "invalid_json" | "invalid_candidates";
+
+class InvalidExpansion extends Error {
+	constructor(readonly reason: FailureReason) {
+		super("Invalid idea expansion response");
+	}
+}
+
+function invalidExpansion(reason: FailureReason): never {
+	throw new InvalidExpansion(reason);
 }
 
 function parseCandidates(text: string): ExpandIdeaResponse {
-	const value: unknown = JSON.parse(text);
-	if (!object(value) || !Array.isArray(value.candidates) || value.candidates.length !== 3) generationFailed();
+	let value: unknown;
+	try { value = JSON.parse(text); }
+	catch { invalidExpansion("invalid_json"); }
+	if (!object(value) || !Array.isArray(value.candidates) || value.candidates.length !== 3) invalidExpansion("invalid_candidates");
 	const candidates: ExpandedIdeaCandidate[] = value.candidates.map((candidate: unknown) => {
-		if (!object(candidate) || typeof candidate.title !== "string" || typeof candidate.content !== "string") generationFailed();
+		if (!object(candidate) || typeof candidate.title !== "string" || typeof candidate.content !== "string") invalidExpansion("invalid_candidates");
 		const title = candidate.title.trim();
 		const content = candidate.content.trim();
-		if (!title || !content || [...title].length > 100 || [...content].length > 500) generationFailed();
+		if (!title || !content || [...title].length > 100 || [...content].length > 500) invalidExpansion("invalid_candidates");
 		return { title, content };
 	});
 	return { candidates };
@@ -52,13 +62,14 @@ ${JSON.stringify({ title: memo.title, content: memo.content })}` },
 			chat_template_kwargs: { enable_thinking: false },
 		});
 		// Gemma returns an OpenAI-compatible chat completion, not a `response` field.
-		if (!object(result) || !Array.isArray(result.choices)) generationFailed();
+		if (!object(result) || !Array.isArray(result.choices)) invalidExpansion("response_shape");
 		const choice: unknown = result.choices[0];
-		if (!object(choice) || choice.finish_reason !== "stop" || !object(choice.message)
-			|| typeof choice.message.content !== "string") generationFailed();
+		if (!object(choice) || !object(choice.message) || typeof choice.message.content !== "string") invalidExpansion("response_shape");
+		if (choice.finish_reason !== "stop") invalidExpansion(choice.finish_reason === "length" ? "output_truncated" : "incomplete_output");
 		return parseCandidates(choice.message.content);
-	} catch {
-		// Do not expose provider errors or the user's memo in the API response/logs.
-		generationFailed();
+	} catch (error) {
+		// Log only fixed reason codes, never provider messages, prompts or generated content.
+		console.warn("AI expansion failed", { reason: error instanceof InvalidExpansion ? error.reason : "provider_error" });
+		throw new ApiError(502, "AI_GENERATION_FAILED", "Failed to generate expanded ideas");
 	}
 }

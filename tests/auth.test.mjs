@@ -435,12 +435,14 @@ test("missing and foreign source memos return 404 before calling AI or saving", 
 	assert.deepEqual(await api(a, "GET", "/api/memos"), []);
 });
 
-test("provider failures and malformed AI responses return 502 without saving", async () => {
+test("provider failures and malformed AI responses return 502 with safe diagnostics and without saving", async (t) => {
+	const warnings = t.mock.method(console, "warn", () => {});
 	const a = await login();
 	const source = await api(a, "POST", "/api/memos", { title: "元", content: "本文" }, 201);
 	const invalid = [
 		null, {}, { response: JSON.stringify(expanded) }, { choices: [] },
 		{ choices: [{ finish_reason: "length", message: { content: JSON.stringify(expanded) } }] },
+		{ choices: [{ finish_reason: "content_filter", message: { content: JSON.stringify(expanded) } }] },
 		{ choices: [{ finish_reason: "stop", message: { content: null } }] },
 		{ choices: [{ finish_reason: "stop", message: { content: "```json\n{}\n```" } }] },
 		...[
@@ -460,6 +462,13 @@ test("provider failures and malformed AI responses return 502 without saving", a
 		assert.equal(response.status, 502);
 		assert.deepEqual(await response.json(), { error: { code: "AI_GENERATION_FAILED", message: "Failed to generate expanded ideas" } });
 	}
+	const reasons = new Set(warnings.mock.calls.map(({ arguments: args }) => {
+		assert.equal(args[0], "AI expansion failed");
+		assert.deepEqual(Object.keys(args[1]), ["reason"]);
+		return args[1].reason;
+	}));
+	assert.equal(warnings.mock.calls.length, invalid.length + 1);
+	assert.deepEqual(reasons, new Set(["response_shape", "output_truncated", "incomplete_output", "invalid_json", "invalid_candidates", "provider_error"]));
 	assert.deepEqual(await api(a, "GET", "/api/memos"), [source]);
 });
 
