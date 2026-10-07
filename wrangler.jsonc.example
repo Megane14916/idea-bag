@@ -33,7 +33,7 @@
 			"database_name": "idea-bag-db",
 			// Placeholder for local development only. Replace with the ID from
 			// `npx wrangler d1 create idea-bag-db` before remote migrations/deploy.
-			"database_id": "ee54de5b-a56a-42cc-857e-e06712131796",
+			"database_id": "REPLACE_WITH_D1_DATABASE_ID",
 			"migrations_dir": "./drizzle",
 			// Use local D1 during development; deployed Workers use the remote DB.
 			"remote": false

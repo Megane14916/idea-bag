@@ -1,90 +1,91 @@
-# React + Vite + Hono + Cloudflare Workers
+# Idea Bag
 
-[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/cloudflare/templates/tree/main/vite-react-template)
+アイデアをメモとして保存・整理し、AIで発展案を生成できるWebアプリです。
 
-This template provides a minimal setup for building a React application with TypeScript and Vite, designed to run on Cloudflare Workers. It features hot module replacement, ESLint integration, and the flexibility of Workers deployments.
+## 使用技術
 
-![React + TypeScript + Vite + Cloudflare Workers](https://imagedelivery.net/wSMYJvS3Xw-n339CbDyDIA/fc7b4b62-442b-4769-641b-ad4422d74300/public)
+- フロントエンド：React / TypeScript / Vite
+- バックエンド：Hono / Cloudflare Workers
+- データベース：Cloudflare D1 / Drizzle ORM
+- 認証：Better Auth / Google OAuth
+- AI：Workers AI / Gemma 4
 
-<!-- dash-content-start -->
+## システム構成
 
-🚀 Supercharge your web development with this powerful stack:
+ReactとAPIを同一のCloudflare Workerから配信します。
 
-- [**React**](https://react.dev/) - A modern UI library for building interactive interfaces
-- [**Vite**](https://vite.dev/) - Lightning-fast build tooling and development server
-- [**Hono**](https://hono.dev/) - Ultralight, modern backend framework
-- [**Cloudflare Workers**](https://developers.cloudflare.com/workers/) - Edge computing platform for global deployment
-
-### ✨ Key Features
-
-- 🔥 Hot Module Replacement (HMR) for rapid development
-- 📦 TypeScript support out of the box
-- 🛠️ ESLint configuration included
-- ⚡ Zero-config deployment to Cloudflare's global network
-- 🎯 API routes with Hono's elegant routing
-- 🔄 Full-stack development setup
-- 🔎 Built-in Observability to monitor your Worker
-
-Get started in minutes with local development or deploy directly via the Cloudflare dashboard. Perfect for building modern, performant web applications at the edge.
-
-<!-- dash-content-end -->
-
-## Getting Started
-
-To start a new project with this template, run:
-
-```bash
-npm create cloudflare@latest -- --template=cloudflare/templates/vite-react-template
+```text
+ブラウザ → React
+         → Hono API → D1
+                    → Google OAuth（Better Auth）
+                    → Workers AI
 ```
 
-A live deployment of this template is available at:
-[https://react-vite-template.templates.workers.dev](https://react-vite-template.templates.workers.dev)
+## ディレクトリ構成
 
-## Development
+```text
+src/
+├─ react-app/    # フロントエンド
+├─ worker/       # API・認証・DB・AI処理
+└─ shared/       # 共通の型
 
-Install dependencies:
-
-```bash
-npm install
+drizzle/         # マイグレーション
+public/          # 静的ファイル
+tests/           # テスト
+docs/            # 詳細ドキュメント
 ```
 
-Start the development server with:
+## 開発環境構築
 
-```bash
+### 前提条件
+
+- Node.js 22.12以上 / npm
+- Cloudflareアカウント
+- Google OAuthクライアント（Web application）
+
+### セットアップ
+
+1. `npm ci` で依存関係をインストールします。
+2. `wrangler.jsonc.example` を `wrangler.jsonc` にコピーします（作成済みなら不要）。
+3. `.dev.vars.example` を `.dev.vars` にコピーし、環境変数を設定します。
+4. Google OAuthのリダイレクトURIに `http://localhost:5173/api/auth/callback/google` を登録します。
+5. 以下を実行します。
+
+```sh
+npx wrangler login
+npm run db:migrate:local
+npm run cf-typegen
 npm run dev
 ```
 
-Your application will be available at [http://localhost:5173](http://localhost:5173).
+[http://localhost:5173](http://localhost:5173) で開きます。DBはローカル、AI推論はCloudflare上で実行します。
 
-## Production
+## 環境変数
 
-Build your project for production:
+`.dev.vars` に設定します。
 
-```bash
+| 変数名 | 値 |
+| --- | --- |
+| `GOOGLE_CLIENT_ID` | Google OAuth Client ID |
+| `GOOGLE_CLIENT_SECRET` | Google OAuth Client Secret |
+| `BETTER_AUTH_SECRET` | 32文字以上のランダムな文字列 |
+| `BETTER_AUTH_URL` | `http://localhost:5173` |
+
+## デプロイ
+
+1. 本番D1を作成し、`wrangler.jsonc` の `REPLACE_WITH_D1_DATABASE_ID` を自分のDBのIDに置き換えます（設定済みなら不要）。
+2. `.env.production` に上記4項目の本番用の値を設定します。`BETTER_AUTH_URL` は公開先のHTTPSオリジンにします。
+3. Google OAuthに `<公開先のオリジン>/api/auth/callback/google` を登録します。
+
+```sh
+# D1未作成の場合のみ
+npx wrangler d1 create idea-bag-db
+
+# 設定後に実行
+npm run cf-typegen
+npm run db:migrate:remote
 npm run build
+npm run deploy -- --secrets-file .env.production
 ```
 
-Preview your build locally:
-
-```bash
-npm run preview
-```
-
-Deploy your project to Cloudflare Workers:
-
-```bash
-npm run build && npm run deploy
-```
-
-Monitor your workers:
-
-```bash
-npx wrangler tail
-```
-
-## Additional Resources
-
-- [Cloudflare Workers Documentation](https://developers.cloudflare.com/workers/)
-- [Vite Documentation](https://vitejs.dev/guide/)
-- [React Documentation](https://reactjs.org/)
-- [Hono Documentation](https://hono.dev/)
+環境変数はWorkers Secretsとして登録されます（[公式ドキュメント](https://developers.cloudflare.com/workers/configuration/secrets/#upload-secrets-alongside-code)）。

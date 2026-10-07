@@ -14,6 +14,14 @@ npm ci
 Copy-Item .dev.vars.example .dev.vars
 ```
 
+`wrangler.jsonc` がない場合は `wrangler.jsonc.example` をコピーします。
+
+```powershell
+Copy-Item wrangler.jsonc.example wrangler.jsonc
+```
+
+`wrangler.jsonc` はGit管理対象外です。ローカル開発ではIDを雛形のまま使用でき、本番公開時に自分のD1のIDへ置き換えます。
+
 認証を使う場合は、後述のGoogle OAuth設定と4つの環境変数の設定が必要です。空欄でも開発サーバーは起動できますが、認証APIは503を返します。
 本物のSecretは `.dev.vars` にのみ記載してください。`.dev.vars*` は既存の `.gitignore` で除外され、exampleのみGit管理対象です。
 
